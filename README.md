@@ -288,11 +288,43 @@ You'll be prompted to enter a YouTube URL, then you can ask unlimited questions.
 
 ---
 
+## ✅ Feature Status
+
+| Feature | Status | Notes |
+|---|---|---|
+| Videos with auto-captions | ✅ Supported | Works on any YouTube video with auto-generated subtitles |
+| Sliding window chunking | ✅ Implemented | 30s window, 5s overlap |
+| Semantic vector search | ✅ Implemented | Pinecone + `gemini-embedding-001` |
+| Multi-turn conversation | ✅ Implemented | `History` array maintained in-session |
+| Pinecone cleanup on exit | ✅ Implemented | `namespace('').deleteAll()` |
+| Timestamp citations | ⚠️ Partial | Metadata stored but **not shown** in answers |
+| Handles long videos | ⚠️ Partial | Chunking works, but no retry/backoff for 429 rate limits |
+| Videos without transcripts | ❌ Not supported | Fails silently if no captions available |
+| Speech-to-text (STT) | ❌ Not implemented | No Whisper or Google STT integration |
+| Hybrid search | ❌ Not implemented | Pure semantic only — no BM25/keyword layer |
+| Source attribution | ❌ Not implemented | Answers don't cite which chunk they came from |
+| Streaming responses | ❌ Not implemented | Full response is awaited before printing |
+| Conversation memory (persistent) | ❌ Not implemented | History resets every session |
+| Multi-video knowledge base | ❌ Not implemented | One video per session; index cleared on exit |
+| User authentication | ❌ Not implemented | No login/session management |
+| Cloud deployment | ❌ Not implemented | Local CLI only |
+
+---
+
 ## 🚀 Upcoming
 
 - [ ] **Web UI** — React/Next.js frontend for a visual chat experience
-- [ ] **Timestamp citations** — Show which part of the video each answer came from
-- [ ] **Multi-video support** — Query across multiple videos simultaneously
+- [ ] **Timestamp citations** — Show which chunk's `startTime`–`endTime` each answer came from
+- [ ] **Multi-video knowledge base** — Query across multiple videos in one session
+- [ ] **Streaming responses** — Token-by-token output using `generateContentStream`
+- [ ] **Source attribution** — Cite the exact video segment in every answer
+- [ ] **Videos without transcripts** — Fallback to Whisper/Google STT for caption-less videos
+- [ ] **Speech-to-text (STT)** — Integrate Whisper API for audio-only transcription
+- [ ] **Hybrid search** — Combine BM25 keyword search with semantic vector search
+- [ ] **Persistent conversation memory** — Save chat history across sessions (e.g., SQLite/Redis)
+- [ ] **User authentication** — Login/session management for multi-user support
+- [ ] **Cloud deployment** — Deploy to Vercel / Railway / GCP
+- [ ] **Retry logic for 429s** — Exponential backoff for Gemini & Pinecone rate limit errors
 - [ ] **Export chat** — Save Q&A sessions to PDF or markdown
 
 ---
