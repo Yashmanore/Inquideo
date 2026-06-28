@@ -21,3 +21,10 @@ export async function clearDatabase() {
         console.error("❌ Error clearing database:", err);
     }
 }
+
+// Only run automatically when executed directly: `node clr.js`
+// When imported by query.js, this block is skipped.
+const isMain = process.argv[1] === new URL(import.meta.url).pathname;
+if (isMain) {
+    clearDatabase();
+}

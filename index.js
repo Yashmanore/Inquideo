@@ -51,24 +51,21 @@ async function convertIntoVector(chunkedDocs) {
             model: "gemini-embedding-001",
             taskType: "RETRIEVAL_DOCUMENT",
             apiKey: process.env.GEMINI_API_KEY,
-            outputDimensionality: 768  // Must match your Pinecone index dimension
+            outputDimensionality: 768,  // Truncate to match Pinecone index dimension
         });
 
-        const pinecone = new Pinecone({
-            apiKey: process.env.PINECONE_API_KEY
-        });
-        const pineconeIndex = pinecone.Index(process.env.PINECONE_INDEX_NAME);
+        const pinecone = new Pinecone();
+        const index = pinecone.Index(process.env.PINECONE_INDEX_NAME);
 
         // 3. Store the filtered validChunks into Pinecone
         await PineconeStore.fromDocuments(validChunks, embeddingsModel, {
-            pineconeIndex: pineconeIndex,
+            pineconeIndex: index,
             maxConcurrency: 2  // Reduce to 1 if you hit 429 Rate Limit errors
         });
 
-        console.log("✅ Embeddings successfully saved to Pinecone!");
-
+        console.log("Embeddings created successfully!");
     } catch (err) {
-        console.error("❌ Error occurred:", err.message);
+        console.log("Error:", err);
     }
 }
 
@@ -101,7 +98,7 @@ function chunkTranscriptWithOverlap(rawTranscript) {
 
         return documents;
     } catch (err) {
-        console.log("Error in chunkTranscriptWithOverlap:", err);
+        console.log("error in chunkTranscriptWithOverlap ", err)
     }
 }
 
@@ -118,8 +115,8 @@ export async function loadTranscript() {
         const rawTranscript = await YoutubeTranscript.fetchTranscript(videoId);
         const chunkedDocs = chunkTranscriptWithOverlap(rawTranscript);
 
-        console.log("Number of chunks:", chunkedDocs.length);
-        console.log("First chunk:", chunkedDocs[0]);
+        // console.log("Number of chunks:", chunkedDocs.length);
+        // console.log("First chunk:", chunkedDocs);
 
         // const embeddings = await ai.models.embedContent({
         //     model: "gemini-embedding-001",
@@ -137,4 +134,11 @@ export async function loadTranscript() {
     } catch (err) {
         console.error(err);
     }
+}
+
+// Only run automatically when executed directly: `node index.js`
+// When imported by query.js, this block is skipped.
+const isMain = process.argv[1] === new URL(import.meta.url).pathname;
+if (isMain) {
+    loadTranscript();
 }

@@ -48,7 +48,7 @@ async function chatting(question) {
             config: {
                 systemInstruction: `
                     You have to behave like a helpful assistant and answer the questions
-                    based on the context you have got. You are a helpful assistant which takes input from the user about a YouTube video link. You get context regarding the question asked. If the answer is not in your context, let the user know politely.
+                    based on the context you have got. You are a helpful assistant which takes input from the user about a YouTube video link. You get context regarding the question asked. If the answer is not in your context, let the user know in polite manner.
                     Context:\n${context}
                 `
             }
