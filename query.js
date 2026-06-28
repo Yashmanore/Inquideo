@@ -11,6 +11,14 @@ dotenv.config();
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const History = [];
 
+function formatTime(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+}
+// 275.28 → "4:35",  305.28 → "5:05"
+
+
 async function chatting(question) {
     try {
         // Bug 3 fixed: removed local `const ai = new GoogleGenAI(...)` that was
@@ -34,7 +42,7 @@ async function chatting(question) {
             includeMetadata: true,
         });
 
-        const context = searchResults.matches.map(match => match.metadata.text).join("\n\n---\n\n");
+        const context = searchResults.matches.map(match => `[${formatTime(match.metadata.startTime)}s - ${formatTime(match.metadata.endTime)}s]\n${match.metadata.text}`).join("\n\n---\n\n");
 
         History.push({
             role: 'user',                   // Bug 4 fixed: semicolon → comma
@@ -48,7 +56,10 @@ async function chatting(question) {
             config: {
                 systemInstruction: `
                     You have to behave like a helpful assistant and answer the questions
-                    based on the context you have got. You are a helpful assistant which takes input from the user about a YouTube video link. You get context regarding the question asked. If the answer is not in your context, let the user know in polite manner.
+                    based on the context you have got. You are a helpful assistant which takes input from the user about a YouTube video link.
+                    You get context regarding the question asked. 
+                    When answering, cite the timestamps in [] format to show where in the video the information comes from.
+                    If the answer is not in your context, let the user know in polite manner.
                     Context:\n${context}
                 `
             }

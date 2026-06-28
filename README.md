@@ -159,19 +159,32 @@ Pinecone performs **approximate nearest-neighbor search** to find the 5 transcri
 
 ---
 
-### Step 7 — Context-Augmented Generation (RAG)
+### Step 7 — Context-Augmented Generation with Timestamp Citations
 
 ```js
+function formatTime(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+}
+
+const context = searchResults.matches.map(match =>
+    `[${formatTime(match.metadata.startTime)} to ${formatTime(match.metadata.endTime)}]\n${match.metadata.text}`
+).join("\n\n---\n\n");
+
 const res = await ai.models.generateContent({
     model: "gemini-2.5-flash",
     contents: History,
     config: {
-        systemInstruction: `Answer based on this context:\n${context}`
+        systemInstruction: `
+            When answering, cite timestamps in [M:SS to M:SS] format (e.g. [4:35 to 5:05]).
+            Context:\n${context}
+        `
     }
 });
 ```
 
-The retrieved chunks are injected into a **system prompt** along with the full conversation history. Gemini 2.5 Flash generates an answer grounded strictly in the retrieved context — not its general knowledge. If the answer isn't in the context, it says so politely.
+The retrieved chunks are injected into the system prompt with **human-readable timestamps** (e.g. `[4:35 to 5:05]`). The LLM is instructed to cite these timestamps in every answer, so the user knows exactly where in the video each piece of information comes from. If the answer isn't in the context, it says so politely.
 
 ---
 
@@ -266,6 +279,7 @@ You'll be prompted to enter a YouTube URL, then you can ask unlimited questions.
 | **topK=5** | Retrieves enough context without overwhelming the LLM prompt |
 | **Conversation history** | Enables natural follow-ups without re-asking context |
 | **Namespace-scoped delete** | Pinecone SDK v5 requires explicit namespace targeting |
+| **M:SS timestamp format** | Raw seconds (e.g. `275.28s`) converted to `4:35` for human readability in citations |
 
 ---
 
@@ -297,12 +311,12 @@ You'll be prompted to enter a YouTube URL, then you can ask unlimited questions.
 | Semantic vector search | ✅ Implemented | Pinecone + `gemini-embedding-001` |
 | Multi-turn conversation | ✅ Implemented | `History` array maintained in-session |
 | Pinecone cleanup on exit | ✅ Implemented | `namespace('').deleteAll()` |
-| Timestamp citations | ⚠️ Partial | Metadata stored but **not shown** in answers |
+| Timestamp citations | ✅ Implemented | Answers include `[M:SS to M:SS]` citations (e.g. `[4:35 to 5:05]`) |
 | Handles long videos | ⚠️ Partial | Chunking works, but no retry/backoff for 429 rate limits |
 | Videos without transcripts | ❌ Not supported | Fails silently if no captions available |
 | Speech-to-text (STT) | ❌ Not implemented | No Whisper or Google STT integration |
 | Hybrid search | ❌ Not implemented | Pure semantic only — no BM25/keyword layer |
-| Source attribution | ❌ Not implemented | Answers don't cite which chunk they came from |
+| Source attribution | ✅ Implemented | Timestamp range cited for each retrieved chunk |
 | Streaming responses | ❌ Not implemented | Full response is awaited before printing |
 | Conversation memory (persistent) | ❌ Not implemented | History resets every session |
 | Multi-video knowledge base | ❌ Not implemented | One video per session; index cleared on exit |
@@ -314,10 +328,8 @@ You'll be prompted to enter a YouTube URL, then you can ask unlimited questions.
 ## 🚀 Upcoming
 
 - [ ] **Web UI** — React/Next.js frontend for a visual chat experience
-- [ ] **Timestamp citations** — Show which chunk's `startTime`–`endTime` each answer came from
 - [ ] **Multi-video knowledge base** — Query across multiple videos in one session
 - [ ] **Streaming responses** — Token-by-token output using `generateContentStream`
-- [ ] **Source attribution** — Cite the exact video segment in every answer
 - [ ] **Videos without transcripts** — Fallback to Whisper/Google STT for caption-less videos
 - [ ] **Speech-to-text (STT)** — Integrate Whisper API for audio-only transcription
 - [ ] **Hybrid search** — Combine BM25 keyword search with semantic vector search
