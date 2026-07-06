@@ -41,7 +41,7 @@ async function chatting(question) {
 
         // Bug 5 fixed: `ai.interactions.create` doesn't exist → use `ai.models.generateContent`
         const res = await ai.models.generateContent({
-            model: "gemini-2.0-flash-lite",
+            model: "gemini-2.5-flash",
             contents: History,
             config: {
                 systemInstruction: `
