@@ -1,12 +1,13 @@
-import React from 'react'
-import { motion } from 'framer-motion'
+import React, { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { User, Bot } from 'lucide-react'
+import { User, Bot, ChevronDown, ChevronUp } from 'lucide-react'
 import SourceCitationCard from './SourceCitationCard.jsx'
 
 export default function MessageBubble({ message }) {
   const isUser = message.role === 'user'
+  const [showSources, setShowSources] = useState(false)
 
   return (
     <motion.div
@@ -50,13 +51,31 @@ export default function MessageBubble({ message }) {
           })}
         </span>
 
-        {/* Sources */}
+        {/* Sources Toggle */}
         {!isUser && message.sources && message.sources.length > 0 && (
           <div className="space-y-2 w-full">
-            <p className="text-slate-500 text-xs px-1 font-medium">Sources</p>
-            {message.sources.map((source, i) => (
-              <SourceCitationCard key={i} source={source} />
-            ))}
+            <button
+              onClick={() => setShowSources(!showSources)}
+              className="text-primary-400 hover:text-primary-300 text-xs px-1 font-medium 
+                         flex items-center gap-1.5 transition-colors focus:outline-none"
+            >
+              <span>{showSources ? 'Hide Sources' : `Show Sources (${message.sources.length})`}</span>
+              {showSources ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
+            <AnimatePresence>
+              {showSources && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="space-y-2 pt-1 overflow-hidden"
+                >
+                  {message.sources.map((source, i) => (
+                    <SourceCitationCard key={i} source={source} />
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
       </div>

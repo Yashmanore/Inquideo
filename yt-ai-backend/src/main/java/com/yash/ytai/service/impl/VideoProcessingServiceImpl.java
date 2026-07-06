@@ -54,17 +54,24 @@ public class VideoProcessingServiceImpl implements VideoProcessingService {
         List<TranscriptChunk> chunks = chunkingService.chunk(transcript);
         log.info("Produced {} chunks", chunks.size());
 
-        // Step 4: Embed each chunk (filters empty ones — mirrors Node.js validChunks filter)
-        List<TranscriptChunk> embeddedChunks = chunks.stream()
+        // Step 4: Embed chunks in batch (filters empty ones first)
+        List<TranscriptChunk> validChunks = chunks.stream()
                 .filter(c -> c.getText() != null && !c.getText().isBlank())
-                .map(chunk -> {
-                    List<Float> embedding = embeddingService.embedDocument(chunk.getText());
-                    chunk.setEmbedding(embedding);
-                    return chunk;
-                })
                 .collect(Collectors.toList());
 
-        log.info("Generated embeddings for {} chunks", embeddedChunks.size());
+        List<String> texts = validChunks.stream()
+                .map(TranscriptChunk::getText)
+                .collect(Collectors.toList());
+
+        List<List<Float>> embeddings = embeddingService.embedDocuments(texts);
+
+        for (int i = 0; i < validChunks.size(); i++) {
+            validChunks.get(i).setEmbedding(embeddings.get(i));
+        }
+
+        List<TranscriptChunk> embeddedChunks = validChunks;
+
+        log.info("Generated embeddings for {} chunks in batch", embeddedChunks.size());
 
         // Step 5: Generate session ID and upsert to Pinecone
         String sessionId = UUID.randomUUID().toString();

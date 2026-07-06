@@ -11,12 +11,23 @@ export async function clearDatabase() {
     try {
         const index = pinecone.Index(process.env.PINECONE_INDEX_NAME);
 
-        // In Pinecone SDK v5, deleteMany({ deleteAll: true }) on the index
-        // object is silently ignored. You must target the namespace explicitly.
-        // LangChain's PineconeStore writes to the default namespace ("") by default.
-        await index.namespace('').deleteAll();
+        // Fetch index stats to get a list of all existing namespaces
+        const stats = await index.describeIndexStats();
+        const namespaces = Object.keys(stats.namespaces || {});
 
-        console.log("✅ All vectors deleted successfully");
+        if (namespaces.length === 0) {
+            console.log("ℹ️ No namespaces found in Pinecone. Database is already clear.");
+            return;
+        }
+
+        console.log(`Found active namespaces: ${namespaces.join(', ')}`);
+
+        for (const ns of namespaces) {
+            console.log(`🗑️  Deleting all vectors in namespace: "${ns}"...`);
+            await index.namespace(ns).deleteAll();
+        }
+
+        console.log("✅ All vectors cleared successfully from all namespaces");
     } catch (err) {
         console.error("❌ Error clearing database:", err);
     }
@@ -24,7 +35,9 @@ export async function clearDatabase() {
 
 // Only run automatically when executed directly: `node clr.js`
 // When imported by query.js, this block is skipped.
-const isMain = process.argv[1] === new URL(import.meta.url).pathname;
+// Normalize both paths for cross-platform comparison (fixes Windows backslash issue)
+const normalizeP = p => p.replace(/\\/g, '/').replace(/^\/([A-Za-z]:)/, '$1');
+const isMain = normalizeP(process.argv[1]) === normalizeP(new URL(import.meta.url).pathname);
 if (isMain) {
     clearDatabase();
 }

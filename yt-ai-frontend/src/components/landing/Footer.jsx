@@ -12,7 +12,7 @@ export default function Footer() {
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-600 to-secondary-500 flex items-center justify-center">
               <Youtube size={16} className="text-white" />
             </div>
-            <span className="font-bold text-white">YT-AI</span>
+            <span className="font-bold text-white">Inquideo</span>
           </div>
 
           {/* Links */}

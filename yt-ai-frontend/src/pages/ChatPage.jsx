@@ -34,10 +34,10 @@ export default function ChatPage() {
       <Sidebar />
 
       {/* Main chat area */}
-      <div className="flex-1 flex flex-col pt-14 min-w-0">
+      <div className="flex-1 flex flex-col pt-14 min-w-0 min-h-0">
 
         {/* Chat window */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           <ChatWindow />
         </div>
 
@@ -93,7 +93,7 @@ export default function ChatPage() {
               </button>
             </div>
             <p className="text-slate-600 text-[10px] text-center mt-2">
-              YT-AI uses Gemini 2.5 Flash · Pinecone vector search · Top-5 semantic retrieval
+              Inquideo uses Gemini 2.5 Flash · Pinecone vector search · Top-5 semantic retrieval
             </p>
           </div>
         </div>

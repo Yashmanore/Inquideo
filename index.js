@@ -118,8 +118,7 @@ async function loadTranscript() {
         const rawTranscript = await YoutubeTranscript.fetchTranscript(videoId);
         const chunkedDocs = chunkTranscriptWithOverlap(rawTranscript);
 
-        console.log("Number of chunks:", chunkedDocs.length);
-        console.log("First chunk:", chunkedDocs[0]);
+        console.log(`\n⏳ Processing transcript into ${chunkedDocs.length} chunks...\n`);
 
         // const embeddings = await ai.models.embedContent({
         //     model: "gemini-embedding-001",
@@ -139,4 +138,5 @@ async function loadTranscript() {
     }
 }
 
-await loadTranscript();
+// Export for use by query.js
+export { loadTranscript };

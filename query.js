@@ -2,18 +2,15 @@ import * as dotenv from 'dotenv';
 import readlineSync from 'readline-sync';
 import { GoogleGenAI } from "@google/genai";
 import { Pinecone } from '@pinecone-database/pinecone';
+import { loadTranscript } from './index.js';
+import { clearDatabase } from './clr.js';
 dotenv.config();
 
-// Bug 1 fixed: removed duplicate `import { GoogleGenAI }` (was on line 5)
-// Bug 2 fixed: added apiKey to the global ai instance
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const History = [];
 
 async function chatting(question) {
     try {
-        // Bug 3 fixed: removed local `const ai = new GoogleGenAI(...)` that was
-        // shadowing the global `ai` — the global one is used for the LLM call below
-
         const response = await ai.models.embedContent({
             model: "gemini-embedding-001",
             contents: question,
@@ -32,45 +29,68 @@ async function chatting(question) {
             includeMetadata: true,
         });
 
-        const context = searchResults.matches.map(match => match.metadata.text).join("\n\n---\n\n");
+        const context = searchResults.matches.map(match =>
+            `[${formatTime(match.metadata.startTime)}s - ${formatTime(match.metadata.endTime)}s]\n${match.metadata.text}`
+        ).join("\n\n---\n\n");
 
         History.push({
-            role: 'user',                   // Bug 4 fixed: semicolon → comma
+            role: 'user',
             parts: [{ text: question }]
         });
 
-        // Bug 5 fixed: `ai.interactions.create` doesn't exist → use `ai.models.generateContent`
         const res = await ai.models.generateContent({
             model: "gemini-2.5-flash",
             contents: History,
             config: {
                 systemInstruction: `
-                    You have to behave like a helpful assistant and answer the questions
-                    based on the context you have got. You are a helpful assistant which takes input from the user about a YouTube video link. You get context regarding the question asked. If the answer is not in your context, let the user know politely.
+                    You are a helpful assistant that answers questions about a YouTube video.
+                    Answer based only on the context provided. Cite timestamps in [M:SS] format when relevant.
+                    If the answer is not in the context, let the user know politely.
                     Context:\n${context}
                 `
             }
         });
 
-        // Bug 6 fixed: was using `response.text` (the embedding response) → use `res.text`
         History.push({
             role: 'model',
             parts: [{ text: res.text }]
         });
 
-        console.log("\n");
-        console.log(res.text);
-        console.log("\n");
+        console.log("\n" + res.text + "\n");
 
     } catch (err) {
         console.log("Error in chatting:", err);
     }
 }
 
+function formatTime(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+}
+
 async function main() {
-    const userProblem = readlineSync.question("Enter your problem : ");
-    await chatting(userProblem);
-    main();
+    // Step 1: Ask for YouTube URL and load transcript into Pinecone
+    console.log("\n🎬 YT-AI — YouTube RAG Chatbot\n");
+    await loadTranscript();
+
+    // Step 2: Chat loop
+    console.log("\n✅ Video loaded! You can now ask questions. Type 'exit' to quit.\n");
+
+    while (true) {
+        const userQuestion = readlineSync.question("You: ");
+
+        if (userQuestion.toLowerCase().trim() === "exit") {
+            console.log("\n🗑️  Clearing Pinecone vectors...");
+            await clearDatabase();
+            console.log("👋 Goodbye!\n");
+            break;
+        }
+
+        if (!userQuestion.trim()) continue;
+
+        await chatting(userQuestion);
+    }
 }
 
 main();

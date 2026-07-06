@@ -26,4 +26,14 @@ public interface EmbeddingService {
      * @throws com.yash.ytai.exception.EmbeddingException on API failure
      */
     List<Float> embedQuery(String text);
+
+    /**
+     * Generates document embeddings in batches (optimized for RAG ingestion).
+     * Reduces API quota consumption by 50x-100x compared to sequential calls.
+     *
+     * @param texts list of texts to embed
+     * @return list of 768-dimensional float vectors
+     * @throws com.yash.ytai.exception.EmbeddingException on API failure
+     */
+    List<List<Float>> embedDocuments(List<String> texts);
 }

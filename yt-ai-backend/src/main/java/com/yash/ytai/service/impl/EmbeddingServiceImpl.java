@@ -39,6 +39,7 @@ import java.util.Map;
 public class EmbeddingServiceImpl implements EmbeddingService {
 
     private static final String EMBED_PATH = "/v1beta/models/{model}:embedContent";
+    private static final String BATCH_EMBED_PATH = "/v1beta/models/{model}:batchEmbedContents";
 
     private final WebClient geminiWebClient;
     private final GeminiConfig geminiConfig;
@@ -58,6 +59,66 @@ public class EmbeddingServiceImpl implements EmbeddingService {
     @Override
     public List<Float> embedQuery(String text) {
         return embed(text, "RETRIEVAL_QUERY");
+    }
+
+    @Override
+    public List<List<Float>> embedDocuments(List<String> texts) {
+        if (texts == null || texts.isEmpty()) {
+            return List.of();
+        }
+
+        log.debug("Batch embedding {} documents", texts.size());
+
+        // Partition into batches of 100 (Gemini batch limit)
+        List<List<String>> batches = partition(texts, 100);
+        List<List<Float>> allEmbeddings = new java.util.ArrayList<>();
+
+        for (List<String> batch : batches) {
+            List<Map<String, Object>> requests = batch.stream()
+                    .map(text -> {
+                        Map<String, Object> req = new HashMap<>();
+                        req.put("model", "models/" + geminiConfig.getEmbeddingModel());
+                        req.put("content", Map.of("parts", List.of(Map.of("text", text))));
+                        req.put("taskType", "RETRIEVAL_DOCUMENT");
+                        req.put("outputDimensionality", geminiConfig.getOutputDimensionality());
+                        return req;
+                    })
+                    .collect(Collectors.toList());
+
+            Map<String, Object> requestBody = Map.of("requests", requests);
+
+            try {
+                BatchEmbedContentResponse response = geminiWebClient.post()
+                        .uri(uriBuilder -> uriBuilder
+                                .path(BATCH_EMBED_PATH)
+                                .build(geminiConfig.getEmbeddingModel()))
+                        .bodyValue(requestBody)
+                        .retrieve()
+                        .bodyToMono(BatchEmbedContentResponse.class)
+                        .block();
+
+                if (response == null || response.getEmbeddings() == null) {
+                    throw new EmbeddingException("Empty response from Gemini batch embedding API");
+                }
+
+                for (EmbeddingValues emb : response.getEmbeddings()) {
+                    if (emb == null || emb.getValues() == null) {
+                        throw new EmbeddingException("Missing values in batch embedding response");
+                    }
+                    allEmbeddings.add(emb.getValues());
+                }
+
+            } catch (WebClientResponseException e) {
+                throw new EmbeddingException(
+                        "Gemini batch embedding API error [" + e.getStatusCode() + "]: " + e.getResponseBodyAsString(), e);
+            } catch (EmbeddingException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new EmbeddingException("Failed to generate batch embeddings: " + e.getMessage(), e);
+            }
+        }
+
+        return allEmbeddings;
     }
 
     /**
@@ -103,12 +164,26 @@ public class EmbeddingServiceImpl implements EmbeddingService {
         }
     }
 
+    private static <T> List<List<T>> partition(List<T> list, int size) {
+        List<List<T>> partitions = new java.util.ArrayList<>();
+        for (int i = 0; i < list.size(); i += size) {
+            partitions.add(list.subList(i, Math.min(i + size, list.size())));
+        }
+        return partitions;
+    }
+
     // ── Response deserialization ──────────────────────────────────────────────
 
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     static class EmbedContentResponse {
         private EmbeddingValues embedding;
+    }
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    static class BatchEmbedContentResponse {
+        private List<EmbeddingValues> embeddings;
     }
 
     @Data

@@ -1,77 +1,69 @@
 package com.yash.ytai.service.impl;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yash.ytai.exception.TranscriptFetchException;
 import com.yash.ytai.model.TranscriptItem;
 import com.yash.ytai.service.TranscriptService;
 import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
 import org.jsoup.parser.Parser;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Fetches YouTube transcripts by scraping the YouTube timedtext endpoint.
+ * Fetches YouTube transcripts using the YouTube InnerTube API.
  *
- * <p>This mirrors the Node.js {@code youtube-transcript} library approach —
- * no YouTube Data API key required. The approach:
- * <ol>
- *   <li>Fetch the video page HTML to extract the {@code captionTracks} JSON</li>
- *   <li>Find the English (or first available) {@code baseUrl}</li>
- *   <li>Fetch the timed-text XML from that URL</li>
- *   <li>Parse each {@code <text>} element into a {@link TranscriptItem}</li>
- * </ol>
+ * <p>This mirrors the {@code youtube-transcript} Node.js library's primary approach:
+ * POST to the InnerTube player endpoint with an Android client context to get caption
+ * track URLs that actually return transcript XML (unlike the web-page-scraped URLs
+ * which now return empty bodies when {@code variant=gemini} is appended).
  */
 @Service
 @Slf4j
 public class TranscriptServiceImpl implements TranscriptService {
 
+    private static final String INNERTUBE_API_URL =
+            "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
+    private static final String INNERTUBE_CLIENT_VERSION = "20.10.38";
+    private static final String INNERTUBE_USER_AGENT =
+            "com.google.android.youtube/" + INNERTUBE_CLIENT_VERSION + " (Linux; U; Android 14)";
+    private static final String BROWSER_USER_AGENT =
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 "
+            + "(KHTML, like Gecko) Chrome/85.0.4183.83 Safari/537.36,gzip(gfe)";
+
     private final WebClient httpClient;
+    private final ObjectMapper objectMapper;
 
     public TranscriptServiceImpl() {
         this.httpClient = WebClient.builder()
-                .defaultHeader("User-Agent", "node")
-                .defaultHeader("Accept-Language", "en-US")
-                .codecs(c -> c.defaultCodecs().maxInMemorySize(5 * 1024 * 1024))
+                .codecs(c -> c.defaultCodecs().maxInMemorySize(10 * 1024 * 1024))
                 .build();
+        this.objectMapper = new ObjectMapper();
     }
 
     @Override
     public List<TranscriptItem> fetchTranscript(String videoId) {
         log.info("Fetching transcript for video: {}", videoId);
         try {
-            // Step 1: Fetch the video page
-            String pageHtml = httpClient.get()
-                    .uri("https://www.youtube.com/watch?v=" + videoId)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block();
-
-            if (pageHtml == null || pageHtml.isBlank()) {
-                throw new TranscriptFetchException("Empty response from YouTube for video: " + videoId);
+            // Step 1: Use InnerTube API (Android client) to get caption track list
+            List<TranscriptItem> items = fetchViaInnerTube(videoId);
+            if (items != null && !items.isEmpty()) {
+                log.info("Fetched {} transcript items via InnerTube for video: {}", items.size(), videoId);
+                return items;
             }
 
-            // Step 2: Extract captionTracks JSON block from the page source
-            String captionBaseUrl = extractCaptionBaseUrl(pageHtml, videoId);
-
-            // Step 3: Fetch the timed-text XML
-            String transcriptXml = httpClient.get()
-                    .uri(captionBaseUrl)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block();
-
-            if (transcriptXml == null || transcriptXml.isBlank()) {
-                throw new TranscriptFetchException("Empty transcript XML for video: " + videoId);
-            }
-
-            // Step 4: Parse XML into TranscriptItem list
-            List<TranscriptItem> items = parseTranscriptXml(transcriptXml);
-            log.info("Fetched {} transcript items for video: {}", items.size(), videoId);
+            // Step 2: Fallback to web page scraping
+            log.warn("InnerTube returned no results for {}, falling back to web scrape", videoId);
+            items = fetchViaWebPage(videoId);
+            log.info("Fetched {} transcript items via web scrape for video: {}", items.size(), videoId);
             return items;
 
         } catch (TranscriptFetchException e) {
@@ -83,11 +75,113 @@ public class TranscriptServiceImpl implements TranscriptService {
     }
 
     /**
+     * Fetches transcript via the YouTube InnerTube API (Android client context).
+     * This is the primary method — avoids the empty-body issue with variant=gemini URLs.
+     */
+    private List<TranscriptItem> fetchViaInnerTube(String videoId) {
+        try {
+            Map<String, Object> body = Map.of(
+                "context", Map.of(
+                    "client", Map.of(
+                        "clientName", "ANDROID",
+                        "clientVersion", INNERTUBE_CLIENT_VERSION
+                    )
+                ),
+                "videoId", videoId
+            );
+
+            String responseBody = httpClient.post()
+                    .uri(INNERTUBE_API_URL)
+                    .header("Content-Type", "application/json")
+                    .header("User-Agent", INNERTUBE_USER_AGENT)
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+
+            if (responseBody == null || responseBody.isBlank()) {
+                return null;
+            }
+
+            JsonNode root = objectMapper.readTree(responseBody);
+            JsonNode captionTracks = root
+                    .path("captions")
+                    .path("playerCaptionsTracklistRenderer")
+                    .path("captionTracks");
+
+            if (!captionTracks.isArray() || captionTracks.isEmpty()) {
+                log.debug("No caption tracks found via InnerTube for video: {}", videoId);
+                return null;
+            }
+
+            // Pick the first English track, or the first available
+            String trackUrl = null;
+            for (JsonNode track : captionTracks) {
+                String lang = track.path("languageCode").asText("");
+                if ("en".equals(lang)) {
+                    trackUrl = track.path("baseUrl").asText(null);
+                    break;
+                }
+            }
+            if (trackUrl == null) {
+                trackUrl = captionTracks.get(0).path("baseUrl").asText(null);
+            }
+
+            if (trackUrl == null || trackUrl.isBlank()) {
+                return null;
+            }
+
+            log.debug("Fetching transcript XML from InnerTube track URL for video: {}", videoId);
+            return fetchAndParseXml(trackUrl, videoId);
+
+        } catch (Exception e) {
+            log.warn("InnerTube approach failed for video {}: {}", videoId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Fallback: fetches the video page and scrapes the captionTracks JSON.
+     */
+    private List<TranscriptItem> fetchViaWebPage(String videoId) {
+        String pageHtml = httpClient.get()
+                .uri("https://www.youtube.com/watch?v=" + videoId)
+                .header("User-Agent", BROWSER_USER_AGENT)
+                .header("Accept-Language", "en-US")
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
+
+        if (pageHtml == null || pageHtml.isBlank()) {
+            throw new TranscriptFetchException("Empty response from YouTube for video: " + videoId);
+        }
+
+        String captionBaseUrl = extractCaptionBaseUrl(pageHtml, videoId);
+        return fetchAndParseXml(captionBaseUrl, videoId);
+    }
+
+    /**
+     * Fetches the transcript XML from a given URL and parses it into {@link TranscriptItem}s.
+     */
+    private List<TranscriptItem> fetchAndParseXml(String url, String videoId) {
+        String transcriptXml = httpClient.get()
+                .uri(url)
+                .header("User-Agent", BROWSER_USER_AGENT)
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
+
+        if (transcriptXml == null || transcriptXml.isBlank()) {
+            throw new TranscriptFetchException("Empty transcript XML for video: " + videoId);
+        }
+
+        return parseTranscriptXml(transcriptXml);
+    }
+
+    /**
      * Extracts the caption track base URL from the YouTube video page HTML.
-     * Searches for the "captionTracks" JSON blob embedded in the page script.
      */
     private String extractCaptionBaseUrl(String pageHtml, String videoId) {
-        // Find the captionTracks segment in the ytInitialPlayerResponse JSON
         int captionIdx = pageHtml.indexOf("\"captionTracks\":");
         if (captionIdx == -1) {
             throw new TranscriptFetchException(
@@ -95,7 +189,6 @@ public class TranscriptServiceImpl implements TranscriptService {
                     ". The video may not have auto-generated subtitles.");
         }
 
-        // Extract the baseUrl value — find first occurrence after captionTracks
         int baseUrlStart = pageHtml.indexOf("\"baseUrl\":\"", captionIdx);
         if (baseUrlStart == -1) {
             throw new TranscriptFetchException("Could not find caption baseUrl for video: " + videoId);
@@ -103,40 +196,49 @@ public class TranscriptServiceImpl implements TranscriptService {
         baseUrlStart += "\"baseUrl\":\"".length();
         int baseUrlEnd = pageHtml.indexOf("\"", baseUrlStart);
 
-        String baseUrl = pageHtml.substring(baseUrlStart, baseUrlEnd)
+        return pageHtml.substring(baseUrlStart, baseUrlEnd)
                 .replace("\\u0026", "&")
                 .replace("\\/", "/");
-
-        log.debug("Extracted caption URL for video {}", videoId);
-        return baseUrl;
     }
 
     /**
-     * Parses the timed-text XML into a list of {@link TranscriptItem}.
-     *
-     * <p>Each {@code <text start="..." dur="...">content</text>} element maps to:
-     * <ul>
-     *   <li>{@code offset} = {@code start} * 1000 (milliseconds)</li>
-     *   <li>{@code duration} = {@code dur} * 1000 (milliseconds)</li>
-     *   <li>{@code text} = decoded HTML entities in content</li>
-     * </ul>
+     * Parses timed-text XML — supports both classic format and srv3 format.
      */
     private List<TranscriptItem> parseTranscriptXml(String xml) {
         Document doc = Jsoup.parse(xml, "", Parser.xmlParser());
 
+        // Try srv3 format first: <p t="ms" d="ms">
+        List<TranscriptItem> srv3 = new ArrayList<>();
+        for (org.jsoup.nodes.Element p : doc.select("p[t][d]")) {
+            long offsetMs  = Long.parseLong(p.attr("t"));
+            long durMs     = Long.parseLong(p.attr("d"));
+            // Collect text from <s> children or fall back to element text
+            String text = p.select("s").stream()
+                    .map(org.jsoup.nodes.Element::text)
+                    .collect(Collectors.joining(""));
+            if (text.isBlank()) text = p.text();
+            text = Jsoup.parse(text).text().trim();
+            if (!text.isBlank()) {
+                srv3.add(TranscriptItem.builder()
+                        .text(text)
+                        .offset(offsetMs)
+                        .duration(durMs)
+                        .build());
+            }
+        }
+        if (!srv3.isEmpty()) return srv3;
+
+        // Fall back to classic format: <text start="s" dur="s">
         return doc.select("text").stream()
                 .map(element -> {
                     double startSec = Double.parseDouble(element.attr("start"));
                     double durSec   = Double.parseDouble(
                             element.hasAttr("dur") ? element.attr("dur") : "1.0");
-
-                    // Decode HTML entities (YouTube XML uses &amp;, &#39;, etc.)
                     String text = Jsoup.parse(element.text()).text();
-
                     return TranscriptItem.builder()
                             .text(text)
-                            .offset((long) (startSec * 1000))    // Convert seconds → ms
-                            .duration((long) (durSec * 1000))    // Convert seconds → ms
+                            .offset((long) (startSec * 1000))
+                            .duration((long) (durSec * 1000))
                             .build();
                 })
                 .filter(item -> item.getText() != null && !item.getText().isBlank())

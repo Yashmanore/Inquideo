@@ -20,7 +20,7 @@ export default function Navbar() {
                           group-hover:scale-110 transition-transform duration-200">
             <Youtube size={16} className="text-white" />
           </div>
-          <span className="font-bold text-white text-lg">YT-AI</span>
+          <span className="font-bold text-white text-lg">Inquideo</span>
         </Link>
 
         {/* Center — session info */}
