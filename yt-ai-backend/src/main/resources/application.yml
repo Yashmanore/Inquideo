@@ -1,0 +1,65 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: yt-ai
+  main:
+    allow-bean-definition-overriding: false
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+# ── Gemini (Google AI) ──────────────────────────────────────────────────────
+gemini:
+  api:
+    key: ${GEMINI_API_KEY}
+    base-url: https://generativelanguage.googleapis.com
+  model:
+    embedding: gemini-embedding-001
+    generation: gemini-2.5-flash
+  embedding:
+    output-dimensionality: 768
+
+# ── Pinecone ─────────────────────────────────────────────────────────────────
+pinecone:
+  api:
+    key: ${PINECONE_API_KEY}
+  index:
+    name: ${PINECONE_INDEX_NAME}
+    # Your Pinecone index host — find it in the Pinecone console under the index details.
+    # Example: https://yashmanore-abc123.svc.aped-4627-b74a.pinecone.io
+    host: ${PINECONE_HOST}
+  search:
+    top-k: 5
+  upsert:
+    max-concurrency: 2
+    batch-size: 100
+
+# ── RAG / Chunking ───────────────────────────────────────────────────────────
+rag:
+  chunking:
+    window-ms: 30000      # 30-second chunk window (exact from Node.js)
+    overlap-ms: 5000      # 5-second overlap between consecutive chunks
+    step-ms: 25000        # step = window - overlap
+
+# ── CORS ─────────────────────────────────────────────────────────────────────
+cors:
+  allowed-origins: http://localhost:5173,http://localhost:3000
+
+# ── SpringDoc / Swagger ──────────────────────────────────────────────────────
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: method
+  default-produces-media-type: application/json
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+logging:
+  level:
+    com.yash.ytai: DEBUG
+    org.springframework.web.reactive.function.client: INFO

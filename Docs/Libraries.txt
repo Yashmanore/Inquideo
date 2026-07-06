@@ -1,0 +1,11 @@
+All the Libraries that are used in this Project
+
+1. youtube-transcript
+2. @langchain/google-genai 
+3. @langchain/core
+4. readline-sync
+5. @langchain/community 
+6. @langchain/textsplitters 
+7. @langchain/pinecone
+8. @langchain-database/pinecone
+9. dotenv
