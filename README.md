@@ -19,12 +19,14 @@ Instead of summarizing the entire video at once or exceeding context window toke
 
 ## 🧠 How the RAG Pipeline Works
 
+This system implements a full end-to-end RAG architecture. Here's every step explained:
+
 ```
 YouTube URL
     │
     ▼
 ┌─────────────────────────────┐
-│  1. Transcript Fetching     │  Jsoup / TimedText API
+│  1. Transcript Fetching     │  youtube-transcript
 └─────────────────────────────┘
     │
     ▼
