@@ -22,6 +22,7 @@ com\yash\ytai\service\impl\VideoProcessingServiceImpl.class
 com\yash\ytai\service\TranscriptService.class
 com\yash\ytai\dto\response\ChatResponse.class
 com\yash\ytai\config\PineconeConfig.class
+com\yash\ytai\service\impl\EmbeddingServiceImpl$BatchEmbedContentResponse.class
 com\yash\ytai\service\EmbeddingService.class
 com\yash\ytai\exception\TranscriptFetchException.class
 com\yash\ytai\service\impl\ChunkingServiceImpl.class
