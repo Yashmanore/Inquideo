@@ -9,11 +9,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.parser.Parser;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -21,10 +21,10 @@ import java.util.stream.Collectors;
 /**
  * Fetches YouTube transcripts using the YouTube InnerTube API.
  *
- * <p>This mirrors the {@code youtube-transcript} Node.js library's primary approach:
- * POST to the InnerTube player endpoint with an Android client context to get caption
- * track URLs that actually return transcript XML (unlike the web-page-scraped URLs
- * which now return empty bodies when {@code variant=gemini} is appended).
+ * <p>Tries multiple InnerTube client strategies in sequence to handle cloud-IP
+ * restrictions (e.g., Render, Railway, Heroku servers) where YouTube may block
+ * or return empty responses for certain client types. Falls back to web scraping
+ * with consent-bypass headers if all InnerTube strategies fail.
  */
 @Service
 @Slf4j
@@ -32,12 +32,40 @@ public class TranscriptServiceImpl implements TranscriptService {
 
     private static final String INNERTUBE_API_URL =
             "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
-    private static final String INNERTUBE_CLIENT_VERSION = "20.10.38";
-    private static final String INNERTUBE_USER_AGENT =
-            "com.google.android.youtube/" + INNERTUBE_CLIENT_VERSION + " (Linux; U; Android 14)";
+
+    // Modern browser User-Agent — used for web-scrape fallback
     private static final String BROWSER_USER_AGENT =
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 "
-            + "(KHTML, like Gecko) Chrome/85.0.4183.83 Safari/537.36,gzip(gfe)";
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            + "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+
+    /**
+     * InnerTube client strategies tried in order.
+     * Each entry: { clientName, clientVersion, userAgent, [clientPlatform] }
+     * Cloud IPs that fail ANDROID often succeed with TVHTML5 or IOS.
+     */
+    private static final List<Map<String, String>> CLIENT_STRATEGIES = List.of(
+        Map.of(
+            "clientName", "ANDROID",
+            "clientVersion", "20.10.38",
+            "userAgent", "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip"
+        ),
+        Map.of(
+            "clientName", "TVHTML5",
+            "clientVersion", "7.20241010.18.00",
+            "userAgent", BROWSER_USER_AGENT,
+            "clientPlatform", "TV"
+        ),
+        Map.of(
+            "clientName", "IOS",
+            "clientVersion", "19.45.4",
+            "userAgent", "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X)"
+        ),
+        Map.of(
+            "clientName", "WEB_EMBEDDED_PLAYER",
+            "clientVersion", "2.20230914.02.00",
+            "userAgent", BROWSER_USER_AGENT
+        )
+    );
 
     private final WebClient httpClient;
     private final ObjectMapper objectMapper;
@@ -53,16 +81,25 @@ public class TranscriptServiceImpl implements TranscriptService {
     public List<TranscriptItem> fetchTranscript(String videoId) {
         log.info("Fetching transcript for video: {}", videoId);
         try {
-            // Step 1: Use InnerTube API (Android client) to get caption track list
-            List<TranscriptItem> items = fetchViaInnerTube(videoId);
-            if (items != null && !items.isEmpty()) {
-                log.info("Fetched {} transcript items via InnerTube for video: {}", items.size(), videoId);
-                return items;
+            // Step 1: Try each InnerTube client strategy in order
+            for (Map<String, String> strategy : CLIENT_STRATEGIES) {
+                String clientName = strategy.get("clientName");
+                try {
+                    List<TranscriptItem> items = fetchViaInnerTube(videoId, strategy);
+                    if (items != null && !items.isEmpty()) {
+                        log.info("Fetched {} transcript items via InnerTube [{}] for video: {}",
+                                items.size(), clientName, videoId);
+                        return items;
+                    }
+                    log.debug("InnerTube [{}] returned no caption tracks for video: {}", clientName, videoId);
+                } catch (Exception e) {
+                    log.warn("InnerTube [{}] failed for video {}: {}", clientName, videoId, e.getMessage());
+                }
             }
 
-            // Step 2: Fallback to web page scraping
-            log.warn("InnerTube returned no results for {}, falling back to web scrape", videoId);
-            items = fetchViaWebPage(videoId);
+            // Step 2: Final fallback — web page scraping with consent-bypass headers
+            log.warn("All InnerTube strategies failed for {}, falling back to web scrape", videoId);
+            List<TranscriptItem> items = fetchViaWebPage(videoId);
             log.info("Fetched {} transcript items via web scrape for video: {}", items.size(), videoId);
             return items;
 
@@ -75,79 +112,101 @@ public class TranscriptServiceImpl implements TranscriptService {
     }
 
     /**
-     * Fetches transcript via the YouTube InnerTube API (Android client context).
-     * This is the primary method — avoids the empty-body issue with variant=gemini URLs.
+     * Fetches transcript using a specific InnerTube client strategy.
+     * Using multiple client types handles cloud-IP blocks — YouTube is more lenient
+     * with TVHTML5 and IOS clients from datacenter IPs than with ANDROID.
      */
-    private List<TranscriptItem> fetchViaInnerTube(String videoId) {
-        try {
-            Map<String, Object> body = Map.of(
-                "context", Map.of(
-                    "client", Map.of(
-                        "clientName", "ANDROID",
-                        "clientVersion", INNERTUBE_CLIENT_VERSION
-                    )
-                ),
-                "videoId", videoId
-            );
+    private List<TranscriptItem> fetchViaInnerTube(String videoId, Map<String, String> strategy) {
+        Map<String, Object> clientContext = new HashMap<>();
+        clientContext.put("clientName", strategy.get("clientName"));
+        clientContext.put("clientVersion", strategy.get("clientVersion"));
+        clientContext.put("hl", "en");
+        clientContext.put("gl", "US");
+        if (strategy.containsKey("clientPlatform")) {
+            clientContext.put("clientPlatform", strategy.get("clientPlatform"));
+        }
 
-            String responseBody = httpClient.post()
-                    .uri(INNERTUBE_API_URL)
-                    .header("Content-Type", "application/json")
-                    .header("User-Agent", INNERTUBE_USER_AGENT)
-                    .bodyValue(body)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block();
+        Map<String, Object> body = Map.of(
+            "context", Map.of("client", clientContext),
+            "videoId", videoId
+        );
 
-            if (responseBody == null || responseBody.isBlank()) {
-                return null;
-            }
+        String responseBody = httpClient.post()
+                .uri(INNERTUBE_API_URL)
+                .header("Content-Type", "application/json")
+                .header("User-Agent", strategy.get("userAgent"))
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Origin", "https://www.youtube.com")
+                .header("X-Youtube-Client-Name", getClientId(strategy.get("clientName")))
+                .header("X-Youtube-Client-Version", strategy.get("clientVersion"))
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(String.class)
+                .block();
 
-            JsonNode root = objectMapper.readTree(responseBody);
-            JsonNode captionTracks = root
-                    .path("captions")
-                    .path("playerCaptionsTracklistRenderer")
-                    .path("captionTracks");
-
-            if (!captionTracks.isArray() || captionTracks.isEmpty()) {
-                log.debug("No caption tracks found via InnerTube for video: {}", videoId);
-                return null;
-            }
-
-            // Pick the first English track, or the first available
-            String trackUrl = null;
-            for (JsonNode track : captionTracks) {
-                String lang = track.path("languageCode").asText("");
-                if ("en".equals(lang)) {
-                    trackUrl = track.path("baseUrl").asText(null);
-                    break;
-                }
-            }
-            if (trackUrl == null) {
-                trackUrl = captionTracks.get(0).path("baseUrl").asText(null);
-            }
-
-            if (trackUrl == null || trackUrl.isBlank()) {
-                return null;
-            }
-
-            log.debug("Fetching transcript XML from InnerTube track URL for video: {}", videoId);
-            return fetchAndParseXml(trackUrl, videoId);
-
-        } catch (Exception e) {
-            log.warn("InnerTube approach failed for video {}: {}", videoId, e.getMessage());
+        if (responseBody == null || responseBody.isBlank()) {
             return null;
         }
+
+        JsonNode root = objectMapper.readTree(responseBody);
+        JsonNode captionTracks = root
+                .path("captions")
+                .path("playerCaptionsTracklistRenderer")
+                .path("captionTracks");
+
+        if (!captionTracks.isArray() || captionTracks.isEmpty()) {
+            return null;
+        }
+
+        // Prefer English track; fall back to first available
+        String trackUrl = null;
+        for (JsonNode track : captionTracks) {
+            String lang = track.path("languageCode").asText("");
+            if ("en".equals(lang)) {
+                trackUrl = track.path("baseUrl").asText(null);
+                break;
+            }
+        }
+        if (trackUrl == null) {
+            trackUrl = captionTracks.get(0).path("baseUrl").asText(null);
+        }
+
+        if (trackUrl == null || trackUrl.isBlank()) {
+            return null;
+        }
+
+        log.debug("Fetching transcript XML from InnerTube [{}] track URL for: {}",
+                strategy.get("clientName"), videoId);
+        return fetchAndParseXml(trackUrl, videoId);
     }
 
     /**
-     * Fallback: fetches the video page and scrapes the captionTracks JSON.
+     * Maps InnerTube client name to its numeric ID for the X-Youtube-Client-Name header.
+     */
+    private String getClientId(String clientName) {
+        return switch (clientName) {
+            case "ANDROID"             -> "3";
+            case "TVHTML5"             -> "7";
+            case "IOS"                 -> "5";
+            case "WEB_EMBEDDED_PLAYER" -> "56";
+            default                    -> "1"; // WEB
+        };
+    }
+
+    /**
+     * Fallback: fetches the YouTube video page HTML and scrapes the captionTracks URL.
+     * Uses full browser headers and a consent cookie to bypass YouTube's consent wall —
+     * this is what causes "captionTracks not found" on cloud/datacenter IPs.
      */
     private List<TranscriptItem> fetchViaWebPage(String videoId) {
         String pageHtml = httpClient.get()
-                .uri("https://www.youtube.com/watch?v=" + videoId)
+                .uri("https://www.youtube.com/watch?v=" + videoId + "&hl=en")
                 .header("User-Agent", BROWSER_USER_AGENT)
-                .header("Accept-Language", "en-US")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Accept-Encoding", "gzip, deflate, br")
+                // Bypasses YouTube's GDPR consent wall that cloud IPs commonly hit
+                .header("Cookie", "CONSENT=YES+cb.20210328-17-p0.en+FX+294; SOCS=CAI=; YSC=bypass")
                 .retrieve()
                 .bodyToMono(String.class)
                 .block();
@@ -161,12 +220,13 @@ public class TranscriptServiceImpl implements TranscriptService {
     }
 
     /**
-     * Fetches the transcript XML from a given URL and parses it into {@link TranscriptItem}s.
+     * Fetches the transcript XML from a caption track URL and parses it.
      */
     private List<TranscriptItem> fetchAndParseXml(String url, String videoId) {
         String transcriptXml = httpClient.get()
                 .uri(url)
                 .header("User-Agent", BROWSER_USER_AGENT)
+                .header("Accept-Language", "en-US,en;q=0.9")
                 .retrieve()
                 .bodyToMono(String.class)
                 .block();
@@ -202,7 +262,7 @@ public class TranscriptServiceImpl implements TranscriptService {
     }
 
     /**
-     * Parses timed-text XML — supports both classic format and srv3 format.
+     * Parses timed-text XML — supports both srv3 format and classic format.
      */
     private List<TranscriptItem> parseTranscriptXml(String xml) {
         Document doc = Jsoup.parse(xml, "", Parser.xmlParser());
@@ -210,9 +270,8 @@ public class TranscriptServiceImpl implements TranscriptService {
         // Try srv3 format first: <p t="ms" d="ms">
         List<TranscriptItem> srv3 = new ArrayList<>();
         for (org.jsoup.nodes.Element p : doc.select("p[t][d]")) {
-            long offsetMs  = Long.parseLong(p.attr("t"));
-            long durMs     = Long.parseLong(p.attr("d"));
-            // Collect text from <s> children or fall back to element text
+            long offsetMs = Long.parseLong(p.attr("t"));
+            long durMs    = Long.parseLong(p.attr("d"));
             String text = p.select("s").stream()
                     .map(org.jsoup.nodes.Element::text)
                     .collect(Collectors.joining(""));
