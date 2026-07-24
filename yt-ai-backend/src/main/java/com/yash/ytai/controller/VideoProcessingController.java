@@ -56,4 +56,28 @@ public class VideoProcessingController {
         ProcessVideoResponse response = videoProcessingService.processVideo(request.getVideoUrl());
         return ResponseEntity.ok(response);
     }
+
+    /**
+     * Diagnostic endpoint to test direct connectivity from the deployed server to the public transcript API.
+     */
+    @GetMapping("/test-fetch/{videoId}")
+    public ResponseEntity<String> testFetch(@PathVariable String videoId) {
+        try {
+            org.springframework.web.reactive.function.client.WebClient client = 
+                org.springframework.web.reactive.function.client.WebClient.builder().build();
+            String url = "https://youtube-transcript.ai/transcript/" + videoId + ".txt?lang=en";
+            String response = client.get()
+                    .uri(url)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+            return ResponseEntity.ok("SUCCESS:\n" + response);
+        } catch (Exception e) {
+            java.io.StringWriter sw = new java.io.StringWriter();
+            java.io.PrintWriter pw = new java.io.PrintWriter(sw);
+            e.printStackTrace(pw);
+            return ResponseEntity.status(500).body("ERROR: " + e.getMessage() + "\nSTACKTRACE:\n" + sw.toString());
+        }
+    }
 }

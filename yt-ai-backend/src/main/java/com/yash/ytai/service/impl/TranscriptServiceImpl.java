@@ -97,8 +97,20 @@ public class TranscriptServiceImpl implements TranscriptService {
                 }
             }
 
-            // Step 2: Final fallback — web page scraping with consent-bypass headers
-            log.warn("All InnerTube strategies failed for {}, falling back to web scrape", videoId);
+            // Step 2: Try public YouTube Transcript AI service (robust fallback for cloud IPs)
+            try {
+                log.info("InnerTube strategies failed. Trying youtube-transcript.ai fallback for video: {}", videoId);
+                List<TranscriptItem> items = fetchViaPublicApi(videoId);
+                if (items != null && !items.isEmpty()) {
+                    log.info("Fetched {} transcript items via youtube-transcript.ai for video: {}", items.size(), videoId);
+                    return items;
+                }
+            } catch (Exception e) {
+                log.warn("youtube-transcript.ai fallback failed for video {}: {}", videoId, e.getMessage());
+            }
+
+            // Step 3: Final fallback — web page scraping with consent-bypass headers
+            log.warn("All InnerTube and public API strategies failed for {}, falling back to web scrape", videoId);
             List<TranscriptItem> items = fetchViaWebPage(videoId);
             log.info("Fetched {} transcript items via web scrape for video: {}", items.size(), videoId);
             return items;
@@ -259,6 +271,111 @@ public class TranscriptServiceImpl implements TranscriptService {
         return pageHtml.substring(baseUrlStart, baseUrlEnd)
                 .replace("\\u0026", "&")
                 .replace("\\/", "/");
+    }
+
+    /**
+     * Fetches transcript from the public youtube-transcript.ai service.
+     */
+    private List<TranscriptItem> fetchViaPublicApi(String videoId) {
+        // Try English first (including auto-translated if that's what's available)
+        try {
+            String url = "https://youtube-transcript.ai/transcript/" + videoId + ".txt?lang=en";
+            String response = httpClient.get()
+                    .uri(url)
+                    .header("User-Agent", BROWSER_USER_AGENT)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+            if (response != null && !response.isBlank() && response.contains("## Transcript")) {
+                return parsePublicApiText(response);
+            }
+        } catch (Exception e) {
+            log.debug("youtube-transcript.ai with lang=en failed: {}", e.getMessage());
+        }
+
+        // Try default language
+        try {
+            String url = "https://youtube-transcript.ai/transcript/" + videoId + ".txt";
+            String response = httpClient.get()
+                    .uri(url)
+                    .header("User-Agent", BROWSER_USER_AGENT)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+            if (response != null && !response.isBlank() && response.contains("## Transcript")) {
+                return parsePublicApiText(response);
+            }
+        } catch (Exception e) {
+            log.debug("youtube-transcript.ai default language failed: {}", e.getMessage());
+        }
+
+        return null;
+    }
+
+    /**
+     * Parses the custom text transcript format returned by youtube-transcript.ai.
+     */
+    private List<TranscriptItem> parsePublicApiText(String text) {
+        List<TranscriptItem> items = new ArrayList<>();
+        String[] lines = text.split("\n");
+        boolean transcriptStarted = false;
+        
+        java.util.regex.Pattern linePattern = java.util.regex.Pattern.compile("^\\[(\\d{1,2}:\\d{2}(?::\\d{2})?)\\]\\s*(.*)$");
+
+        for (String line : lines) {
+            line = line.trim();
+            if (!transcriptStarted) {
+                if (line.equalsIgnoreCase("## Transcript")) {
+                    transcriptStarted = true;
+                }
+                continue;
+            }
+
+            java.util.regex.Matcher matcher = linePattern.matcher(line);
+            if (matcher.find()) {
+                String timestampStr = matcher.group(1);
+                String lineText = matcher.group(2);
+                
+                lineText = Jsoup.parse(lineText).text().trim();
+                long offsetMs = parseTimestampToMs(timestampStr);
+                
+                items.add(TranscriptItem.builder()
+                        .text(lineText)
+                        .offset(offsetMs)
+                        .duration(0L)
+                        .build());
+            }
+        }
+
+        for (int i = 0; i < items.size(); i++) {
+            TranscriptItem current = items.get(i);
+            if (i < items.size() - 1) {
+                TranscriptItem next = items.get(i + 1);
+                current.setDuration(Math.max(1000L, next.getOffset() - current.getOffset()));
+            } else {
+                current.setDuration(5000L);
+            }
+        }
+
+        return items.stream()
+                .filter(item -> item.getText() != null && !item.getText().isBlank())
+                .collect(Collectors.toList());
+    }
+
+    private long parseTimestampToMs(String timestamp) {
+        String[] parts = timestamp.split(":");
+        long totalSeconds = 0;
+        if (parts.length == 2) {
+            long minutes = Long.parseLong(parts[0]);
+            long seconds = Long.parseLong(parts[1]);
+            totalSeconds = minutes * 60 + seconds;
+        } else if (parts.length == 3) {
+            long hours = Long.parseLong(parts[0]);
+            long minutes = Long.parseLong(parts[1]);
+            long seconds = Long.parseLong(parts[2]);
+            totalSeconds = hours * 3600 + minutes * 60 + seconds;
+        }
+        return totalSeconds * 1000L;
     }
 
     /**
