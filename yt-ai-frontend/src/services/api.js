@@ -1,7 +1,8 @@
 import axios from 'axios'
 
-// Base URL — uses Vite proxy in dev, env var in production
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+// Automatically switches between your Render production URL and localhost for dev
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+const BASE_URL = `${API_BASE_URL}/api/v1`
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -70,4 +71,4 @@ export const getChatHistory = (sessionId) =>
 export const cleanupSession = (sessionId) =>
   api.delete(`/cleanup/${sessionId}`)
 
-export default api
+export default API_BASE_URL
