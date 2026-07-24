@@ -116,7 +116,7 @@ public class TranscriptServiceImpl implements TranscriptService {
      * Using multiple client types handles cloud-IP blocks — YouTube is more lenient
      * with TVHTML5 and IOS clients from datacenter IPs than with ANDROID.
      */
-    private List<TranscriptItem> fetchViaInnerTube(String videoId, Map<String, String> strategy) {
+    private List<TranscriptItem> fetchViaInnerTube(String videoId, Map<String, String> strategy) throws Exception {
         Map<String, Object> clientContext = new HashMap<>();
         clientContext.put("clientName", strategy.get("clientName"));
         clientContext.put("clientVersion", strategy.get("clientVersion"));
