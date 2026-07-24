@@ -1,9 +1,9 @@
 import React from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Youtube, ArrowLeft } from 'lucide-react'
+import { Youtube, ArrowLeft, Menu } from 'lucide-react'
 import { useChat } from '../../context/ChatContext.jsx'
 
-export default function Navbar() {
+export default function Navbar({ onToggleSidebar }) {
   const { isSessionActive, sessionId, chunksProcessed } = useChat()
   const location = useLocation()
   const isChat = location.pathname === '/chat'
@@ -13,15 +13,26 @@ export default function Navbar() {
             style={{ background: 'rgba(15,23,42,0.85)', backdropFilter: 'blur(16px)' }}>
       <nav className="max-w-screen-2xl mx-auto px-4 h-14 flex items-center justify-between">
 
-        {/* Logo */}
-        <Link to="/" className="flex items-center gap-2 group">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-600 to-secondary-500
-                          flex items-center justify-center shadow-glow-purple
-                          group-hover:scale-110 transition-transform duration-200">
-            <Youtube size={16} className="text-white" />
-          </div>
-          <span className="font-bold text-white text-lg">Inquideo</span>
-        </Link>
+        {/* Left - Logo & Mobile Menu Toggle */}
+        <div className="flex items-center gap-2">
+          {isChat && onToggleSidebar && (
+            <button
+              onClick={onToggleSidebar}
+              className="md:hidden p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/50 transition-colors focus:outline-none"
+              aria-label="Toggle pipeline menu"
+            >
+              <Menu size={18} />
+            </button>
+          )}
+          <Link to="/" className="flex items-center gap-2 group">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-600 to-secondary-500
+                            flex items-center justify-center shadow-glow-purple
+                            group-hover:scale-110 transition-transform duration-200">
+              <Youtube size={16} className="text-white" />
+            </div>
+            <span className="font-bold text-white text-lg">Inquideo</span>
+          </Link>
+        </div>
 
         {/* Center — session info */}
         {isSessionActive && isChat && (

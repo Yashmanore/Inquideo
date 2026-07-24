@@ -9,8 +9,16 @@ import { useChat } from '../context/ChatContext.jsx'
 
 export default function ChatPage() {
   const [input, setInput] = useState('')
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const { send, isTyping, chatError, isSessionActive } = useChatActions()
   const { messages } = useChat()
+
+  // Auto-close sidebar on mobile when session is successfully activated
+  React.useEffect(() => {
+    if (isSessionActive) {
+      setIsSidebarOpen(false)
+    }
+  }, [isSessionActive])
 
   const handleSend = async () => {
     if (!input.trim() || isTyping) return
@@ -27,11 +35,11 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
-      <Navbar />
+    <div className="flex h-screen bg-background overflow-hidden relative">
+      <Navbar onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
 
       {/* Sidebar */}
-      <Sidebar />
+      <Sidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
 
       {/* Main chat area */}
       <div className="flex-1 flex flex-col pt-14 min-w-0 min-h-0">
