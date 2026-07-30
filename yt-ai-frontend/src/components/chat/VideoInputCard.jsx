@@ -82,6 +82,27 @@ export default function VideoInputCard() {
             </>
           )}
         </button>
+
+        <button
+          id="process-video-btn"
+          type="button"
+          // disabled={isProcessing || !inputUrl.trim()}
+          onClick={() => window.open('https://youtube.com', '_blank')}
+          className="btn-primary w-full text-sm py-2.5"
+        >
+          {isProcessing ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              Heading...
+            </>
+          ) : (
+            <>
+              Head To Youtube
+              <ArrowRight size={16} />
+            </>
+          )}
+        </button>
+
       </form>
 
       {/* Status */}
